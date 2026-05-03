@@ -1,0 +1,16 @@
+# Exclude heavy data folders
+dataset_new/
+driver-drowsiness-detection.ipynb
+
+# Exclude environment and git files
+__pycache__/
+*.pyc
+.env
+.git
+.gitignore
+venv/
+.venv/
+
+# Exclude logs and temp files
+*.log
+temp_*

@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+python-multipart
+opencv-python-headless
+numpy<2.0.0
+dlib
+tensorflow==2.10.1
+tensorflow-hub
+pygame
