@@ -1,30 +1,43 @@
 import cv2
+import numpy as np
 import os
 import dlib
 import time
 import shutil
 import asyncio
 import threading
-import tensorflow as tf
-print("Num GPUs Available: ", len(tf.config.list_physical_devices('GPU')))
+
 from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse, StreamingResponse, FileResponse
+try:
+    from pygame import mixer
+except Exception:
+    mixer = None
 
-from src.detection import detector, predictor
+from src.detection import detector, predictor, clamp_rect
 from src.inference import eye_model, yawn_model
 from src.processing import prepare_roi_square
 
 
+# =========================
+# PATHS
+# =========================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(BASE_DIR)
-ALARM_PATH = os.path.join(PROJECT_ROOT, "alarm.wav")
+ALARM_PATH = os.environ.get("ALARM_PATH", os.path.join(PROJECT_ROOT, "alarm.wav"))
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(PROJECT_ROOT, "uploads"))
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-app = FastAPI(
-    title="DriveSafe-VISION-DMS-v2",
-    description="High-performance Driver Monitoring System using dlib and MobileNetV2",
-    version="2.0.0"
-)
 
+beep_sound = None
+if mixer is not None:
+    try:
+        mixer.init()
+        beep_sound = mixer.Sound(ALARM_PATH)
+    except Exception:
+        beep_sound = None
+
+app = FastAPI()
 
 HOME_HTML = """
 <!doctype html>
@@ -63,7 +76,7 @@ HOME_HTML = """
             padding: 32px;
         }
         .shell {
-            width: min(960px, 100%);
+            width: min(1040px, 100%);
             display: grid;
             grid-template-columns: 1.05fr 0.95fr;
             gap: 28px;
@@ -92,8 +105,8 @@ HOME_HTML = """
         }
         h1 {
             margin: 18px 0 12px;
-            font-size: clamp(42px, 6vw, 72px);
-            line-height: 0.95;
+            font-size: clamp(40px, 5vw, 68px);
+            line-height: 1;
             letter-spacing: 0;
         }
         .summary {
@@ -113,6 +126,11 @@ HOME_HTML = """
             background: rgba(255,255,255,0.045);
             border: 1px solid var(--line);
             border-radius: 8px;
+            transition: transform 0.2s ease, border-color 0.2s ease;
+        }
+        .metric:hover {
+            transform: translateY(-3px);
+            border-color: rgba(50, 213, 131, 0.35);
         }
         .metric strong { display: block; font-size: 22px; }
         .metric span { color: var(--muted); font-size: 12px; }
@@ -135,6 +153,18 @@ HOME_HTML = """
             border: 1px dashed rgba(255,255,255,0.24);
             border-radius: 8px;
             background: rgba(255,255,255,0.04);
+            transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s ease;
+        }
+        .drop-zone.dragging {
+            border-color: var(--accent-2);
+            background: rgba(50, 213, 131, 0.08);
+            transform: translateY(-2px);
+        }
+        .file-name {
+            min-height: 20px;
+            color: var(--accent-2);
+            font-size: 14px;
+            font-weight: 700;
         }
         input[type="file"] {
             width: 100%;
@@ -158,8 +188,9 @@ HOME_HTML = """
             background: linear-gradient(135deg, #ff3b30, #d91f2a);
             box-shadow: 0 14px 34px rgba(255, 59, 48, 0.28);
             font-size: 16px;
+            transition: transform 0.2s ease, filter 0.2s ease;
         }
-        .submit:hover { filter: brightness(1.06); }
+        .submit:hover { filter: brightness(1.06); transform: translateY(-2px); }
         .hint {
             margin: 0;
             color: var(--muted);
@@ -179,7 +210,7 @@ HOME_HTML = """
             <div class="brand">
                 <div>
                     <div class="eyebrow">High-performance Driver Monitoring System</div>
-                    <h1>High-performance Driver Monitoring System</h1>
+                    <h1>DriveSafe-VISION DMS v2</h1>
                     <p class="summary">Upload a driving video and monitor fatigue signals with eye-closure and yawn detection.</p>
                 </div>
                 <div class="metrics" aria-label="monitoring signals">
@@ -193,13 +224,51 @@ HOME_HTML = """
                     <h2 class="upload-title">Analyze video</h2>
                     <p class="hint">Choose a video file to start the drowsiness check.</p>
                 </div>
-                <label class="drop-zone">
-                    <input type="file" name="file" accept="video/*" required>
+                <label id="dropZone" class="drop-zone">
+                    <input id="videoInput" type="file" name="file" accept="video/*" required>
+                    <span id="fileName" class="file-name">No video selected</span>
                 </label>
-                <button class="submit" type="submit">Analyze Now</button>
+                <button id="submitButton" class="submit" type="submit">Analyze Now</button>
             </form>
         </section>
     </main>
+    <script>
+        const dropZone = document.getElementById('dropZone');
+        const videoInput = document.getElementById('videoInput');
+        const fileName = document.getElementById('fileName');
+        const submitButton = document.getElementById('submitButton');
+
+        ['dragenter', 'dragover'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropZone.classList.add('dragging');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach((eventName) => {
+            dropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                dropZone.classList.remove('dragging');
+            });
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            const files = event.dataTransfer.files;
+            if (files.length) {
+                videoInput.files = files;
+                fileName.textContent = files[0].name;
+            }
+        });
+
+        videoInput.addEventListener('change', () => {
+            fileName.textContent = videoInput.files.length ? videoInput.files[0].name : 'No video selected';
+        });
+
+        document.querySelector('form').addEventListener('submit', () => {
+            submitButton.textContent = 'Uploading...';
+            submitButton.disabled = true;
+        });
+    </script>
 </body>
 </html>
 """
@@ -374,15 +443,26 @@ PROCESSING_HTML = """
 </html>
 """
 
+def play_alarm():
+    if mixer is None or beep_sound is None:
+        return
+    try:
+        if not mixer.get_busy():
+            beep_sound.play()
+    except Exception:
+        pass
 
-# --- PROCESSOR CLASS ---
+
+# =========================
+# PROCESSOR
+# =========================
 class VideoProcessor:
     def __init__(self, video_path: str):
-        self.video_path   = video_path
+        self.video_path = video_path
         self.latest_frame = None
-        self.finished     = False
+        self.finished = False
         self.alert_pending = False
-        self.lock         = threading.Lock()
+        self.lock = threading.Lock()
 
     def start(self):
         threading.Thread(target=self._process, daemon=True).start()
@@ -403,118 +483,293 @@ class VideoProcessor:
 
     def _process(self):
         cap = cv2.VideoCapture(self.video_path)
+
         actual_fps = cap.get(cv2.CAP_PROP_FPS)
         if actual_fps <= 0 or actual_fps > 120:
             actual_fps = 30.0
 
-        # --- SPEED OPTIMIZATION LOGIC ---
-        # 1. Lower Target FPS: 7 FPS is the "sweet spot" for safety vs speed.
-        # 2. Higher Skip Rate: Process fewer frames to reach the 35s goal.
-        TARGET_INFERENCE_FPS = 7.0
-        skip_rate = max(1, int(actual_fps / TARGET_INFERENCE_FPS))
+        # =========================
+        # REAL-TIME SPEED SETTINGS
+        # =========================
+        TARGET_INFERENCE_FPS = 5.0
+        skip_rate = max(1, int(round(actual_fps / TARGET_INFERENCE_FPS)))
 
-        EYE_CLOSED_SEC       = 1.5
-        YAWN_SEC             = 0.6
-        EYE_FRAME_THRESHOLD  = int(TARGET_INFERENCE_FPS * EYE_CLOSED_SEC)
-        YAWN_FRAME_THRESHOLD = int(TARGET_INFERENCE_FPS * YAWN_SEC)
-        BLINK_IGNORE_FRAMES  = int(TARGET_INFERENCE_FPS * 0.4)
+        DETECT_W, DETECT_H = 432, 243
+        LANDMARK_REFRESH_EVERY = 3
+        FACE_DETECT_REFRESH_EVERY = 4
+        YAWN_EVAL_EVERY = 2
 
-        EYE_COUNTER_CAP      = EYE_FRAME_THRESHOLD + 3
-        YAWN_COUNTER_CAP     = YAWN_FRAME_THRESHOLD + 3
-        ALARM_COOLDOWN_SEC   = 3.0 # Fixed cooldown for stability
+        # =========================
+        # DETECTION SETTINGS
+        # =========================
+        EYE_CLOSED_THRESHOLD = 0.35
+        EYE_CLOSED_SEC = 0.85
+        OPEN_GRACE_SEC = 0.18
 
-        eye_frames, yawn_frames, consecutive_closed = 0, 0, 0
-        last_alert = 0
+        YAWN_THRESHOLD = 0.85
+        YAWN_SEC = 0.60
+        YAWN_FRAME_THRESHOLD = max(1, int(TARGET_INFERENCE_FPS * YAWN_SEC))
+        YAWN_COUNTER_CAP = YAWN_FRAME_THRESHOLD + 2
+
+        ALARM_COOLDOWN_SEC = 3.0
+
         frame_idx = 0
+        processed_idx = 0
+
+        eye_closed_start_time = None
+        eye_open_grace_start = None
+        yawn_frames = 0
+        last_alert = 0.0
+
+        cached_face = None
+        cached_land = None
+        last_yawn_pred = None
+        last_avg_eye_pred = None
+        last_eye_closed_now = False
+        last_eye_closed_duration = 0.0
 
         while cap.isOpened():
             ret, frame = cap.read()
-            if not ret: break
+            if not ret:
+                break
 
             frame_idx += 1
             if frame_idx % skip_rate != 0:
                 continue
 
-            # 3. FAST DOWN-SAMPLING: Smaller frames make dlib 2-3x faster.
+            processed_idx += 1
             h, w = frame.shape[:2]
-            small_frame = cv2.resize(frame, (640, 360), interpolation=cv2.INTER_AREA)
-            gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
 
-            # Detect on the small frame
-            faces = detector(gray, 0)
-
-            status, color = "Monitoring...", (0, 255, 0)
+            status = "Monitoring..."
+            color = (0, 255, 0)
             face_found = False
 
-            for face in faces:
+            # -------------------------
+            # FACE DETECTION (NOT EVERY FRAME)
+            # -------------------------
+            need_face_refresh = (
+                cached_face is None or
+                processed_idx % FACE_DETECT_REFRESH_EVERY == 1
+            )
+
+            if need_face_refresh:
+                small_frame = cv2.resize(frame, (DETECT_W, DETECT_H), interpolation=cv2.INTER_AREA)
+                small_gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
+                faces = detector(small_gray, 0)
+
+                if faces:
+                    face = faces[0]
+                    sx = w / float(DETECT_W)
+                    sy = h / float(DETECT_H)
+
+                    scaled_face = dlib.rectangle(
+                        int(face.left() * sx),
+                        int(face.top() * sy),
+                        int(face.right() * sx),
+                        int(face.bottom() * sy)
+                    )
+                    cached_face = clamp_rect(scaled_face, w, h)
+                else:
+                    cached_face = None
+                    cached_land = None
+
+            if cached_face is not None:
                 face_found = True
 
-                # Scale coordinates back to original frame size for dlib predictor
-                scaling_factor = w / 640
-                scaled_face = dlib.rectangle(
-                    int(face.left() * scaling_factor), int(face.top() * scaling_factor),
-                    int(face.right() * scaling_factor), int(face.bottom() * scaling_factor)
+                # -------------------------
+                # LANDMARKS (NOT EVERY FRAME)
+                # -------------------------
+                need_landmark_refresh = (
+                    cached_land is None or
+                    processed_idx % LANDMARK_REFRESH_EVERY == 1
                 )
 
-                # Predict landmarks on original high-res frame for accuracy
-                land = predictor(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY), scaled_face)
+                if need_landmark_refresh:
+                    gray_full = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    cached_land = predictor(gray_full, cached_face)
 
-                # --- EYE LOGIC ---
-                closed_count = 0
-                for eye_pts in [[land.part(i) for i in range(36, 42)], [land.part(i) for i in range(42, 48)]]:
-                    e_roi = prepare_roi_square(frame, eye_pts, 0.55)
-                    if e_roi is not None:
-                        if eye_model(e_roi, training=False).numpy()[0][0] < 0.35:
-                            closed_count += 1
+                land = cached_land
 
-                if closed_count == 2:
-                    consecutive_closed += 1
-                    if consecutive_closed > BLINK_IGNORE_FRAMES:
-                        eye_frames = min(eye_frames + 1, EYE_COUNTER_CAP)
+                left_eye_pts = [land.part(i) for i in range(36, 42)]
+                right_eye_pts = [land.part(i) for i in range(42, 48)]
+                mouth_pts = [land.part(i) for i in range(48, 68)]
+
+                # -------------------------
+                # EYE MODEL (BATCHED)
+                # -------------------------
+                left_roi = prepare_roi_square(frame, left_eye_pts, pad=0.42, out_size=224)
+                right_roi = prepare_roi_square(frame, right_eye_pts, pad=0.42, out_size=224)
+
+                left_eye_pred = None
+                right_eye_pred = None
+                avg_eye_pred = last_avg_eye_pred
+
+                eye_batch = []
+                eye_tags = []
+
+                if left_roi is not None:
+                    eye_batch.append(left_roi)
+                    eye_tags.append("left")
+                if right_roi is not None:
+                    eye_batch.append(right_roi)
+                    eye_tags.append("right")
+
+                if eye_batch:
+                    eye_batch_np = np.stack(eye_batch, axis=0)
+                    preds = eye_model(eye_batch_np, training=False).numpy().reshape(-1)
+
+                    for tag, pred in zip(eye_tags, preds):
+                        if tag == "left":
+                            left_eye_pred = float(pred)
+                        elif tag == "right":
+                            right_eye_pred = float(pred)
+
+                    valid_eye_preds = [p for p in [left_eye_pred, right_eye_pred] if p is not None]
+                    if valid_eye_preds:
+                        avg_eye_pred = float(sum(valid_eye_preds) / len(valid_eye_preds))
+                        last_avg_eye_pred = avg_eye_pred
+
+                both_closed = (
+                    left_eye_pred is not None and
+                    right_eye_pred is not None and
+                    left_eye_pred < EYE_CLOSED_THRESHOLD and
+                    right_eye_pred < EYE_CLOSED_THRESHOLD
+                )
+
+                avg_closed = (
+                    avg_eye_pred is not None and
+                    avg_eye_pred < (EYE_CLOSED_THRESHOLD + 0.02)
+                )
+
+                eye_closed_now = both_closed or avg_closed
+                now = time.time()
+
+                if eye_closed_now:
+                    eye_open_grace_start = None
+                    if eye_closed_start_time is None:
+                        eye_closed_start_time = now
+                    eye_closed_duration = now - eye_closed_start_time
                 else:
-                    consecutive_closed = 0
-                    eye_frames = max(0, eye_frames - 2)
+                    if eye_closed_start_time is not None:
+                        if eye_open_grace_start is None:
+                            eye_open_grace_start = now
+                        elif (now - eye_open_grace_start) > OPEN_GRACE_SEC:
+                            eye_closed_start_time = None
+                            eye_open_grace_start = None
 
-                # --- YAWN LOGIC ---
-                m_pts = [land.part(i) for i in range(48, 68)]
-                m_roi = prepare_roi_square(frame, m_pts, 0.3)
-                if m_roi is not None:
-                    if yawn_model(m_roi, training=False).numpy()[0][0] > 0.85:
-                        yawn_frames = min(yawn_frames + 1, YAWN_COUNTER_CAP)
+                    if eye_closed_start_time is not None:
+                        eye_closed_duration = now - eye_closed_start_time
                     else:
-                        yawn_frames = max(0, yawn_frames - 1)
+                        eye_closed_duration = 0.0
 
-                # --- ALERT LOGIC ---
-                is_drowsy = (eye_frames >= EYE_FRAME_THRESHOLD or yawn_frames >= YAWN_FRAME_THRESHOLD)
+                last_eye_closed_now = eye_closed_now
+                last_eye_closed_duration = eye_closed_duration
+                eye_drowsy = eye_closed_duration >= EYE_CLOSED_SEC
+
+                # -------------------------
+                # YAWN MODEL (LESS OFTEN)
+                # -------------------------
+                if processed_idx % YAWN_EVAL_EVERY == 0:
+                    mouth_roi = prepare_roi_square(frame, mouth_pts, pad=0.25, out_size=224)
+                    if mouth_roi is not None:
+                        mouth_batch = np.expand_dims(mouth_roi, axis=0)
+                        last_yawn_pred = float(
+                            yawn_model(mouth_batch, training=False).numpy()[0][0]
+                        )
+
+                        if last_yawn_pred > YAWN_THRESHOLD:
+                            yawn_frames = min(yawn_frames + 1, YAWN_COUNTER_CAP)
+                        else:
+                            yawn_frames = max(0, yawn_frames - 1)
+
+                yawn_drowsy = yawn_frames >= YAWN_FRAME_THRESHOLD
+
+                # -------------------------
+                # ALERT LOGIC
+                # -------------------------
+                is_drowsy = eye_drowsy or yawn_drowsy
+
                 if is_drowsy:
-                    status, color = "!! DROWSY !!", (0, 0, 255)
+                    status = "!! DROWSY !!"
+                    color = (0, 0, 255)
+
                     if (time.time() - last_alert) > ALARM_COOLDOWN_SEC:
+                        threading.Thread(target=play_alarm, daemon=True).start()
                         self.trigger_browser_alarm()
                         last_alert = time.time()
-                        # Partial reset to prevent immediate re-beeping
-                        eye_frames = EYE_FRAME_THRESHOLD // 2
-                        yawn_frames = YAWN_FRAME_THRESHOLD // 2
 
-                cv2.rectangle(frame, (scaled_face.left(), scaled_face.top()),
-                              (scaled_face.right(), scaled_face.bottom()), color, 2)
+                    if eye_drowsy:
+                        eye_closed_start_time = time.time() - 0.30
 
-            if not face_found:
-                eye_frames = max(0, eye_frames - 1)
+                    if yawn_drowsy:
+                        yawn_frames = max(0, YAWN_FRAME_THRESHOLD // 2)
+
+                elif last_eye_closed_now:
+                    status = "Eyes Closed..."
+                    color = (0, 165, 255)
+
+                cv2.rectangle(
+                    frame,
+                    (cached_face.left(), cached_face.top()),
+                    (cached_face.right(), cached_face.bottom()),
+                    color,
+                    2
+                )
+
+                # Minimal overlay only
+                cv2.putText(
+                    frame,
+                    status,
+                    (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    color,
+                    2
+                )
+                if last_avg_eye_pred is not None:
+                    cv2.putText(
+                        frame,
+                        f"Eye:{last_avg_eye_pred:.3f} Time:{last_eye_closed_duration:.2f}/{EYE_CLOSED_SEC:.2f}",
+                        (30, 82),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.58,
+                        (255, 255, 255),
+                        2
+                    )
+
+            else:
+                eye_closed_start_time = None
+                eye_open_grace_start = None
                 yawn_frames = max(0, yawn_frames - 1)
+                cached_land = None
+                last_avg_eye_pred = None
+                last_eye_closed_now = False
+                last_eye_closed_duration = 0.0
 
-            cv2.putText(frame, status, (30, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
+                cv2.putText(
+                    frame,
+                    status,
+                    (30, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1.0,
+                    color,
+                    2
+                )
 
-            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
             with self.lock:
                 self.latest_frame = buffer.tobytes()
 
         cap.release()
         self.finished = True
+
         if os.path.exists(self.video_path):
             os.remove(self.video_path)
 
 
-# --- STREAM GENERATOR ---
+# =========================
+# STREAM GENERATOR
+# =========================
 async def stream_frames(processor: VideoProcessor):
     stream_fps = 20
     frame_delay = 1.0 / stream_fps
@@ -522,18 +777,28 @@ async def stream_frames(processor: VideoProcessor):
 
     while not processor.finished or processor.get_latest_frame() is not None:
         t_start = time.time()
+
         frame_bytes = processor.get_latest_frame()
-        if frame_bytes: last_frame = frame_bytes
+        if frame_bytes:
+            last_frame = frame_bytes
 
         if last_frame:
-            yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + last_frame + b'\r\n')
+            yield (
+                b'--frame\r\n'
+                b'Content-Type: image/jpeg\r\n\r\n' +
+                last_frame +
+                b'\r\n'
+            )
 
         elapsed = time.time() - t_start
         sleep_time = frame_delay - elapsed
-        if sleep_time > 0: await asyncio.sleep(sleep_time)
+        if sleep_time > 0:
+            await asyncio.sleep(sleep_time)
 
 
-# --- ROUTES ---
+# =========================
+# ROUTES
+# =========================
 @app.get("/", response_class=HTMLResponse)
 async def main():
     return HOME_HTML
@@ -541,12 +806,14 @@ async def main():
 
 @app.post("/upload")
 async def upload_video(file: UploadFile = File(...)):
-    temp_path = f"temp_{file.filename}"
+    temp_path = os.path.join(UPLOAD_DIR, f"temp_{file.filename}")
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
+
     processor = VideoProcessor(temp_path)
     processor.start()
     app.state.processor = processor
+
     return HTMLResponse(content=PROCESSING_HTML)
 
 
@@ -562,15 +829,19 @@ async def alarm_status():
         return {"alert": processor.consume_alert(), "finished": processor.finished}
     return {"alert": False, "finished": False}
 
-
 @app.get("/stream_result")
 async def stream_result():
     processor = getattr(app.state, "processor", None)
     if processor:
-        return StreamingResponse(stream_frames(processor), media_type="multipart/x-mixed-replace; boundary=frame")
-    return "No video."
+        return StreamingResponse(
+            stream_frames(processor),
+            media_type="multipart/x-mixed-replace; boundary=frame"
+        )
+    return HTMLResponse("No video.")
 
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
