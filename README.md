@@ -259,8 +259,8 @@ docker build -t drivesafe-vision-dms .
 ```bash
 docker run --rm -p 8000:8000 --gpus all drivesafe-vision-dms
 ```
-
 In case GPU resources cannot be accessed, the container can still be launched without `--gpus all`. Performance may suffer due to this limitation.
+
 ---
 
 ## Training notebook
