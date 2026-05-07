@@ -97,32 +97,48 @@ The system emphasizes two indicators of drowsiness:
 
 ```mermaid
 flowchart TD
-    A[Video Upload] --> B[FastAPI Backend]
-    B --> C[VideoProcessor Pipeline]
-    C --> D[Frame Sampling / Skip Logic]
-    D --> E[Face Detection on Reduced Frame]
-    E --> F[Face Box Scaling and Clamp to Original Frame]
-    F --> G[Cached Landmark Refresh Logic]
-    G --> H[dlib Landmark Prediction on Original Frame]
+    subgraph Training Phase
+        A[Dataset Collection]
+        B[Data Preprocessing]
+        C[Model Training<br/>MobileNetV2]
+        D[Export Eye and Yawn .h5 Models]
+        A --> B --> C --> D
+    end
 
-    H --> I[Eye Landmark Extraction]
-    H --> J[Mouth Landmark Extraction]
+    subgraph Deployment Phase
+        E[src/inference.py<br/>Load Models + GPU Config]
+        F[Dockerfile<br/>Containerized FastAPI App]
+        G[src/main.py<br/>FastAPI Backend]
+        D --> E --> F --> G
+    end
 
-    I --> K[Eye ROI Preprocessing]
-    J --> L[Mouth ROI Preprocessing]
+    subgraph Runtime Pipeline
+        H[Video Upload]
+        I[VideoProcessor Pipeline]
+        J[Frame Sampling / Skip Logic]
+        K[Face Detection on Reduced Frame]
+        L[Scale Face Box + Clamp]
+        M[Cached Landmark Refresh]
+        N[dlib Landmark Prediction on Original Frame]
+        O[Eye Landmark Extraction]
+        P[Mouth Landmark Extraction]
+        Q[Eye ROI Preprocessing<br/>src/processing.py]
+        R[Mouth ROI Preprocessing<br/>src/processing.py]
+        S[Batched Eye Model Inference]
+        T[Yawn Model Inference]
+        U[Eye Closure Temporal Logic]
+        V[Yawn Temporal Logic]
+        W[Drowsiness Decision Engine]
+        X[Alarm Trigger / Cooldown]
+        Y[Annotated Frame Encoding]
+        Z[Processed Stream to Browser]
 
-    K --> M[Batched Eye Model Inference]
-    L --> N[Yawn Model Inference]
-
-    M --> O[Eye Closure Time Logic]
-    N --> P[Yawn Temporal Logic]
-
-    O --> Q[Drowsiness Decision Engine]
-    P --> Q
-
-    Q --> R[Alarm Trigger / Cooldown]
-    Q --> S[Annotated Frame Encoding]
-    S --> T[Processed Stream to Browser]
+        G --> H --> I --> J --> K --> L --> M --> N
+        N --> O --> Q --> S --> U --> W
+        N --> P --> R --> T --> V --> W
+        W --> X
+        W --> Y --> Z
+    end
 
 ```
 ---
