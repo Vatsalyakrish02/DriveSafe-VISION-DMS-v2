@@ -3,16 +3,23 @@
 The DriveSafe-VISION-DMS-v2 driver monitoring system was created, and it became a real-time system when the process of coordinate scaling was optimized and a multithreaded Python backend was added to reduce the latency of the model.
 This is a real-time driver monitoring system that recognizes signs of driver drowsiness using eye closure and yawning detection and is provided via a FastAPI web interface. Real-Time Driver Monitoring System Based on Computer Vision and Deep Learning
 
+---
+
 ## Demo
 
 ![Demo IMG](docs/screenshot1.png)
 
+```md
 <video src="docs/demo1.mp4" controls width="900"></video>
+```
+---
 
 ## Problem Statement
 
 Fatigue while driving represents one of the most significant threats for long-distance and night driving. Such a warning system should provide sufficient accuracy, speed (so that it can function in near real-time), and stability (avoiding unnecessary triggering due to normal blinking or unstable frame-by-frame predictions).
 Many research projects focus on merely demonstrating offline prediction results or even an application of face landmark detector in OpenCV. This project, however, will have a deployment-oriented approach in mind when implementing face landmark detector, classification, temporal logic, web browser, and Dockerization together.
+
+---
 
 ## Overview
 
@@ -21,6 +28,7 @@ The program implements the processing of driving videos using a modular pipeline
 The system emphasizes two indicators of drowsiness:
 - Eye closure within a prolonged time window.
 - Mouth opening in conjunction with yawning.
+---
 
 ## Features
 
@@ -31,6 +39,7 @@ The system emphasizes two indicators of drowsiness:
 - ROI acquisition and preprocessing with squaring, sharpening, RGB transformation, resize, and normalization.
 - Configuration of file paths via environment variables for models, uploaded files, alarms sounds, and GPU memory constraints.
 - Docker containerization with a CUDA-enabled Ubuntu 22.04 base image.
+---
 
 ## Project structure
 
@@ -54,6 +63,7 @@ The system emphasizes two indicators of drowsiness:
     ├── detection.py
     └── processing.py
 ```
+---
 
 ### File guide
 
@@ -65,6 +75,7 @@ The system emphasizes two indicators of drowsiness:
 - `file.dockerignore` filters out dataset, Jupyter notebook, temporaries, and local environment files from the Docker image.
 - `requirements.txt` lists exact dependency tree used by the project.
 - `driver-drowsiness-detection.ipynb` is the Jupyter notebook that was used for training and experimenting with models, and needs to be included in the project documentation page.
+---
 
 # System Architecture
 
@@ -75,6 +86,7 @@ The system emphasizes two indicators of drowsiness:
 3. The eyes and mouths are cut from the image as square ROIs and processed before classification.
 4. Eye state classification is done by the eye classifier and mouth movements are predicted by the yawn model.
 5. An alarm is raised based on results obtained from the FastAPI application and sent back to the browser.
+---
 
 ## Flow Chart
 
@@ -145,6 +157,7 @@ tensorflow==2.10.1
 tensorflow-hub
 pygame
 ```
+---
 
 ## Local setup
 
@@ -184,6 +197,7 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
 Then open the application in the browser and upload a video for analysis.
+---
 
 ## Environment variables
 
@@ -196,6 +210,8 @@ This project is configured to be portable and deployable using environmental set
 | `UPLOAD_DIR` | Directory to which video files are uploaded. |
 | `TF_GPU_MEMORY_LIMIT_MB` | TensorFlow GPU memory limit, if any. |
 
+---
+
 ### Example
 
 ```bash
@@ -204,6 +220,8 @@ set ALARM_PATH=C:\path\to\alarm.wav
 set UPLOAD_DIR=C:\path\to\uploads
 set TF_GPU_MEMORY_LIMIT_MB= 4000    # It can be adjusted according to your hardware specs
 ```
+
+---
 
 ## Docker
 
@@ -222,6 +240,7 @@ docker run --rm -p 8000:8000 --gpus all drivesafe-vision-dms
 ```
 
 In case GPU resources cannot be accessed, the container can still be launched without `--gpus all`. Performance may suffer due to this limitation.
+---
 
 ## Training notebook
 
@@ -233,18 +252,21 @@ A possible suggestion for documentation within the notebook section is as follow
 - neural network architecture and training,
 - validation metrics,
 - saving `.h5` model.
+---
 
 ## Deployment notes
 
 - The current project is specifically designed using dlib instead of MediaPipe since the pinned stack dependencies work perfectly for this method.
 - The modularity of `main.py`, `inference.py`, `detection.py`, and `processing.py` ensures that optimization becomes easy once there is a need to optimize any portion of the pipeline.
 - The current application works on the principle of uploading videos; however, in the future, this pipeline can also be made adaptable to the dashcam or webcam approach.
+---
 
 ## Limitations
 
 - Performance is affected by the hardware, video resolution, and speed of the dlib landmark detector.
 - Trained models and dlib landmarks are not installed as part of the Python requirements and need to be provided externally.
 - Detection accuracy will be affected in conditions of low light, face obstruction, wearing glasses, motion blur, or sudden head movement.
+---
 
 ## Future improvements
 
@@ -252,6 +274,7 @@ A possible suggestion for documentation within the notebook section is as follow
 - Benchmarking of MediaPipe on another machine to compare its performance with dlib.
 - Incorporation of other driving cues like EAR, MAR, or head pose.
 - Adding information regarding training accuracy and development of models to the repository documentation.
+---
 
 ## Disclaimer
 
