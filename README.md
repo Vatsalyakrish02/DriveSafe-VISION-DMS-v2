@@ -7,11 +7,16 @@ This is a real-time driver monitoring system that recognizes signs of driver dro
 
 ## Demo
 
-![Demo IMG](docs/screenshot1.png)
+https://github.com/user-attachments/assets/fcad5b36-524b-47bd-92a3-c1d493fc355b
 
-```md
-<video src="docs/demo1.mp4" controls width="900"></video>
-```
+https://github.com/user-attachments/assets/c22d3707-e348-4572-9568-8c120d27f957
+
+### Screenshots
+
+<img width="1375" height="702" alt="screenshot2" src="https://github.com/user-attachments/assets/5ef27a46-97db-4733-b157-2a20c375a5eb" />
+<img width="1793" height="847" alt="screenshot1" src="https://github.com/user-attachments/assets/de64a2f9-1261-46a2-bfee-eced96ad1520" />
+<img width="1842" height="842" alt="Screenshot3" src="https://github.com/user-attachments/assets/11808634-c5b2-4b18-a380-25a37b9cfc8f" />
+
 ---
 
 ## Problem Statement
