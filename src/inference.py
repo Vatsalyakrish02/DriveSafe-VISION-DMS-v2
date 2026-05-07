@@ -58,3 +58,8 @@ with tf.device(device_name):
         custom_objects=custom_objs,
         compile=False
     )
+
+# DriveSafe-VISION-DMS-v2
+# Developed by Vatsalya
+# GitHub: https://github.com/Vatsalyakrish02
+# License: MIT

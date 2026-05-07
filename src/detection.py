@@ -21,3 +21,8 @@ def clamp_rect(rect, w, h):
     r = min(w - 1, rect.right())
     b = min(h - 1, rect.bottom())
     return dlib.rectangle(l, t, r, b)
+
+# DriveSafe-VISION-DMS-v2
+# Developed by Vatsalya
+# GitHub: https://github.com/Vatsalyakrish02
+# License: MIT

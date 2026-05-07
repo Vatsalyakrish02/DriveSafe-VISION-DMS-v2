@@ -50,3 +50,8 @@ def prepare_roi_square(img, pts, pad=0.45, out_size=224):
     roi = cv2.resize(roi, (out_size, out_size), interpolation=cv2.INTER_LINEAR)
     roi = roi.astype(np.float32) / 255.0
     return roi
+
+# DriveSafe-VISION-DMS-v2
+# Developed by Vatsalya
+# GitHub: https://github.com/Vatsalyakrish02
+# License: MIT
