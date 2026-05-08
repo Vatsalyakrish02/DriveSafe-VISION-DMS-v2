@@ -218,6 +218,7 @@ uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
 
 Then open the application in the browser and upload a video for analysis.
+
 ---
 
 ## Environment variables
