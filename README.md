@@ -295,7 +295,6 @@ A possible suggestion for documentation within the notebook section is as follow
 - Live streaming support for dash cam footage.
 - Benchmarking of MediaPipe on another machine to compare its performance with dlib.
 - Incorporation of other driving cues like EAR, MAR, or head pose.
-- Adding information regarding training accuracy and development of models to the repository documentation.
 ---
 
 ## Disclaimer
